@@ -148,7 +148,11 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   float cropX = 0, cropY = 0;
 
   LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d", bitmap.getWidth(), bitmap.getHeight(), pageWidth, pageHeight);
-  if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
+  // Always run scale/crop branch when dimensions differ (covers upscale case too, e.g. X4-sized
+  // sleep bitmaps on X3's 528x792 panel). Previously this only triggered when the bitmap exceeded
+  // the screen in either dimension, so smaller X4 images rendered at 1:1 with letterbox offsets.
+  const bool exactFit = (bitmap.getWidth() == pageWidth && bitmap.getHeight() == pageHeight);
+  if (!exactFit) {
     // image will scale, make sure placement is right
     float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
     const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
