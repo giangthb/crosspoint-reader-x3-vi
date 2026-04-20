@@ -84,15 +84,16 @@ Những fix tôi tự phát hiện và vá thêm so với upstream `crosspoint-r
 
 - Trigger scale/crop khi `bitmap size != screen size` (không chỉ khi lớn hơn).
 - Thêm flag `allowUpscale` vào `drawBitmap()` (default `false`). Chỉ `SleepActivity` opt-in. BmpViewer, cover thumbnails, Lyra themes giữ nguyên hành vi 1:1 centering như master.
+- Bypass 1-bit fast path `drawBitmap1Bit()` khi `allowUpscale=true` → ảnh 1-bit cũng được upscale đúng.
 - Thay render loop 1:1 bằng **dest-span fill** (nearest-neighbor block): mỗi source pixel ghi ra span `[floor(idx*scale), floor((idx+1)*scale) - 1]`. Khi `scale ≤ 1.0` span = 1, nên hành vi downscale / no-scale không đổi, bit-for-bit giống master.
 
-**Test case:** ảnh X4 480×800 → X3 528×792 CROP mode → giờ render full 528×792, không còn viền trống.
+**Test case:** ảnh X4 480×800 → X3 528×792 CROP mode → giờ render full 528×792, không còn viền trống (đúng cả 2-bit greyscale lẫn 1-bit monochrome).
 
 > Behavior change nhỏ: user có `/sleep/*.bmp` nhỏ hơn panel (trước đây render 1:1 centered) giờ sẽ thấy ảnh bị scale lên fill panel ở CONTAIN/CROP. Đúng semantics của 2 mode đó, nhưng khác hành vi cũ.
 
-Commits: [`10aeb6f`](../../commit/10aeb6f) + [`1740fdc`](../../commit/1740fdc) • Files: `lib/GfxRenderer/GfxRenderer.{h,cpp}`, `src/activities/boot_sleep/SleepActivity.cpp`.
+Commits: [`10aeb6f`](../../commit/10aeb6f) + [`1740fdc`](../../commit/1740fdc) + [`7f03723`](../../commit/7f03723) • Files: `lib/GfxRenderer/GfxRenderer.{h,cpp}`, `src/activities/boot_sleep/SleepActivity.cpp`.
 
-Upstream PR: [crosspoint-reader/crosspoint-reader#1716](https://github.com/crosspoint-reader/crosspoint-reader/pull/1716) — đã address review của CodeRabbit, chờ maintainer.
+Upstream PR: [crosspoint-reader/crosspoint-reader#1716](https://github.com/crosspoint-reader/crosspoint-reader/pull/1716) — đã address 2 rounds review của CodeRabbit, chờ maintainer.
 
 ## Build từ source
 
