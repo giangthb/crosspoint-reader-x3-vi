@@ -633,7 +633,7 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
 }
 
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY) const {
+                             const float cropX, const float cropY, const bool allowUpscale) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
@@ -664,12 +664,15 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     hasTargetBounds = true;
   }
 
-  // Scale when target bounds differ from cropped bitmap size (both upscale and downscale).
-  // Previously only downscale (fitScale < 1.0) was applied, so an X4-sized sleep image on an X3
-  // panel rendered at 1:1 with a letterbox offset instead of filling the screen in CROP mode.
-  if (hasTargetBounds && fitScale != 1.0f) {
-    scale = fitScale;
-    isScaled = true;
+  // Downscale whenever the cropped bitmap overflows the target bounds (pre-existing behavior).
+  // Upscale is opt-in via `allowUpscale`: callers with CONTAIN/COVER semantics (SleepActivity)
+  // set the flag so an X4-sized sleep image on an X3 panel fills the screen in CROP mode, while
+  // callers like BmpViewer keep native-size rendering for undersized bitmaps.
+  if (hasTargetBounds) {
+    if (fitScale < 1.0f || (allowUpscale && fitScale > 1.0f)) {
+      scale = fitScale;
+      isScaled = true;
+    }
   }
   LOG_DBG("GFX", "Scaling by %f - %s", scale, isScaled ? "scaled" : "not scaled");
 
