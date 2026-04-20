@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fetch upstream + VI fork
         run: |
@@ -25,27 +26,59 @@ jobs:
           git fetch upstream
           git fetch vi
 
-      - name: Collect new commits
+      - name: Load last-seen SHAs
+        id: baseline
+        run: |
+          STATE=.github/upstream-watch-state.json
+          if [ -f "$STATE" ]; then
+            UP_LAST=$(jq -r '.upstream // ""' "$STATE")
+            VI_LAST=$(jq -r '.vi // ""' "$STATE")
+          else
+            UP_LAST=""
+            VI_LAST=""
+          fi
+
+          # Fallback baseline (first run): current tips so we only flag FUTURE commits
+          [ -z "$UP_LAST" ] && UP_LAST=$(git rev-parse upstream/master)
+          [ -z "$VI_LAST" ] && VI_LAST=$(git rev-parse vi/master)
+
+          echo "up_last=$UP_LAST" >> "$GITHUB_OUTPUT"
+          echo "vi_last=$VI_LAST" >> "$GITHUB_OUTPUT"
+          echo "Baseline upstream: $UP_LAST"
+          echo "Baseline vi:       $VI_LAST"
+
+      - name: Collect truly new commits
         id: collect
         run: |
-          git log upstream/master --not master --oneline > /tmp/upstream.log || true
-          git log vi/master --not master --oneline > /tmp/vi.log || true
+          UP_LAST=${{ steps.baseline.outputs.up_last }}
+          VI_LAST=${{ steps.baseline.outputs.vi_last }}
+
+          UP_TIP=$(git rev-parse upstream/master)
+          VI_TIP=$(git rev-parse vi/master)
+
+          # New commits since last seen, excluding merge commits for signal/noise
+          git log "$UP_LAST..upstream/master" --no-merges --oneline > /tmp/upstream.log || true
+          git log "$VI_LAST..vi/master"       --no-merges --oneline > /tmp/vi.log       || true
 
           UP_COUNT=$(wc -l < /tmp/upstream.log | tr -d ' ')
-          VI_COUNT=$(wc -l < /tmp/vi.log | tr -d ' ')
+          VI_COUNT=$(wc -l < /tmp/vi.log       | tr -d ' ')
 
           UP_TAG=$(git ls-remote --tags https://github.com/crosspoint-reader/crosspoint-reader.git \
                    | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1 || echo 'n/a')
           VI_TAG=$(git ls-remote --tags https://github.com/danoooob/crosspoint-reader-vi.git \
                    | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1 || echo 'n/a')
 
-          echo "up_count=$UP_COUNT" >> "$GITHUB_OUTPUT"
-          echo "vi_count=$VI_COUNT" >> "$GITHUB_OUTPUT"
-          echo "up_tag=$UP_TAG"     >> "$GITHUB_OUTPUT"
-          echo "vi_tag=$VI_TAG"     >> "$GITHUB_OUTPUT"
+          {
+            echo "up_count=$UP_COUNT"
+            echo "vi_count=$VI_COUNT"
+            echo "up_tag=$UP_TAG"
+            echo "vi_tag=$VI_TAG"
+            echo "up_tip=$UP_TIP"
+            echo "vi_tip=$VI_TIP"
+          } >> "$GITHUB_OUTPUT"
 
-          echo "Upstream: $UP_COUNT new commits, latest tag $UP_TAG"
-          echo "VI fork:  $VI_COUNT new commits, latest tag $VI_TAG"
+          echo "Upstream: $UP_COUNT new (non-merge) commits, latest tag $UP_TAG"
+          echo "VI fork:  $VI_COUNT new (non-merge) commits, latest tag $VI_TAG"
 
       - name: Build issue body
         if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
@@ -56,7 +89,7 @@ jobs:
           [ -z "$VI_LOG" ] && VI_LOG="(none)"
 
           {
-            echo "Cronjob phát hiện cập nhật từ upstream hoặc VI fork."
+            echo "Cronjob phát hiện cập nhật mới từ upstream hoặc VI fork."
             echo ""
             echo "## Upstream (\`crosspoint-reader/crosspoint-reader\`)"
             echo ""
@@ -90,7 +123,7 @@ jobs:
             echo "git rebase upstream/master"
             echo ""
             echo "# Option 2 — nếu VI fork có commit mới về i18n/font, cherry-pick:"
-            echo "git log vi/master --oneline | head"
+            echo "git log vi/master --oneline --no-merges | head"
             echo "# git cherry-pick <sha>"
             echo ""
             echo "# Push + tag để tự build release:"
@@ -128,4 +161,25 @@ jobs:
             gh issue edit "$EXISTING" --body-file /tmp/body.md
           else
             gh issue create --title "$TITLE" --body-file /tmp/body.md --label upstream-sync
+          fi
+
+      - name: Update state file
+        run: |
+          mkdir -p .github
+          cat > .github/upstream-watch-state.json <<EOF
+          {
+            "upstream": "${{ steps.collect.outputs.up_tip }}",
+            "vi":       "${{ steps.collect.outputs.vi_tip }}",
+            "updated":  "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+          if ! git diff --quiet .github/upstream-watch-state.json; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/upstream-watch-state.json
+            git commit -m "chore(watch): update upstream-watch state [skip ci]"
+            git push
+          else
+            echo "State unchanged."
           fi
