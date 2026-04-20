@@ -1,40 +1,78 @@
-name: Compile Release
+name: Release firmware
+
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.2.0-x3-vi)'
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
-  build-release:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11'
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
         with:
-          version: "latest"
-          enable-cache: false
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
 
-      - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U platformio
 
-      - name: Build CrossPoint
+      - name: Build gh_release
         run: pio run -e gh_release
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(sha256sum .pio/build/gh_release/firmware.bin | cut -d' ' -f1)
+          SIZE=$(stat -c%s .pio/build/gh_release/firmware.bin)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "firmware SHA256: $SHA"
+          echo "firmware size:   $SIZE bytes"
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         with:
-          name: CrossPoint-${{ github.ref_name }}
-          path: |
-            .pio/build/gh_release/bootloader.bin
-            .pio/build/gh_release/firmware.bin
-            .pio/build/gh_release/firmware.elf
-            .pio/build/gh_release/firmware.map
-            .pio/build/gh_release/partitions.bin
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }} — Xteink X3 with Vietnamese
+          generate_release_notes: true
+          body: |
+            Firmware build `${{ steps.tag.outputs.tag }}` cho Xteink X3 với hỗ trợ tiếng Việt.
+
+            - `firmware.bin` — ${{ steps.sha.outputs.size }} bytes
+            - SHA256: `${{ steps.sha.outputs.sha256 }}`
+
+            **Flash qua web:** https://x3.crosspointreader.com/ → "Flash custom firmware"
+
+            Xem README để biết chi tiết, hướng dẫn flash và rollback.
+          files: .pio/build/gh_release/firmware.bin

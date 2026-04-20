@@ -1,0 +1,122 @@
+name: Watch upstream updates
+
+on:
+  schedule:
+    # 07:00 UTC mỗi ngày = 14:00 Asia/Bangkok
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream + VI fork
+        run: |
+          git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git || true
+          git remote add vi https://github.com/danoooob/crosspoint-reader-vi.git || true
+          git fetch upstream
+          git fetch vi
+
+      - name: Collect new commits
+        id: collect
+        run: |
+          git log upstream/master --not master --oneline > /tmp/upstream.log || true
+          git log vi/master --not master --oneline > /tmp/vi.log || true
+
+          UP_COUNT=$(wc -l < /tmp/upstream.log | tr -d ' ')
+          VI_COUNT=$(wc -l < /tmp/vi.log | tr -d ' ')
+
+          UP_TAG=$(git ls-remote --tags https://github.com/crosspoint-reader/crosspoint-reader.git \
+                   | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1 || echo 'n/a')
+          VI_TAG=$(git ls-remote --tags https://github.com/danoooob/crosspoint-reader-vi.git \
+                   | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1 || echo 'n/a')
+
+          echo "up_count=$UP_COUNT" >> "$GITHUB_OUTPUT"
+          echo "vi_count=$VI_COUNT" >> "$GITHUB_OUTPUT"
+          echo "up_tag=$UP_TAG"     >> "$GITHUB_OUTPUT"
+          echo "vi_tag=$VI_TAG"     >> "$GITHUB_OUTPUT"
+
+          echo "Upstream: $UP_COUNT new commits, latest tag $UP_TAG"
+          echo "VI fork:  $VI_COUNT new commits, latest tag $VI_TAG"
+
+      - name: Build issue body
+        if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
+        run: |
+          UP_LOG=$(head -25 /tmp/upstream.log)
+          VI_LOG=$(head -25 /tmp/vi.log)
+          [ -z "$UP_LOG" ] && UP_LOG="(none)"
+          [ -z "$VI_LOG" ] && VI_LOG="(none)"
+
+          {
+            echo "Cronjob phát hiện cập nhật từ upstream hoặc VI fork."
+            echo ""
+            echo "## Upstream (\`crosspoint-reader/crosspoint-reader\`)"
+            echo ""
+            echo "- Commits mới: **${{ steps.collect.outputs.up_count }}**"
+            echo "- Tag upstream mới nhất: \`${{ steps.collect.outputs.up_tag }}\`"
+            echo ""
+            echo '```'
+            echo "$UP_LOG"
+            echo '```'
+            echo ""
+            echo "## VI fork (\`danoooob/crosspoint-reader-vi\`)"
+            echo ""
+            echo "- Commits mới: **${{ steps.collect.outputs.vi_count }}**"
+            echo "- Tag VI fork mới nhất: \`${{ steps.collect.outputs.vi_tag }}\`"
+            echo ""
+            echo '```'
+            echo "$VI_LOG"
+            echo '```'
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Cách update"
+            echo ""
+            echo '```bash'
+            echo "git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git"
+            echo "git remote add vi       https://github.com/danoooob/crosspoint-reader-vi.git"
+            echo "git fetch upstream vi"
+            echo ""
+            echo "# Option 1 — rebase đơn giản nếu chỉ upstream thay đổi:"
+            echo "git checkout master"
+            echo "git rebase upstream/master"
+            echo ""
+            echo "# Option 2 — nếu VI fork có commit mới về i18n/font, cherry-pick:"
+            echo "git log vi/master --oneline | head"
+            echo "# git cherry-pick <sha>"
+            echo ""
+            echo "# Push + tag để tự build release:"
+            echo "git push --force-with-lease origin master"
+            echo "git tag v1.x.y-x3-vi && git push origin v1.x.y-x3-vi"
+            echo '```'
+          } > /tmp/body.md
+
+          cat /tmp/body.md
+
+      - name: Open / update issue
+        if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          TITLE="Upstream update available ($TODAY)"
+
+          EXISTING=$(gh issue list --state open --label upstream-sync \
+                     --json number,title --jq \
+                     '.[] | select(.title == "'"$TITLE"'") | .number' || true)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #$EXISTING đã tồn tại, update nội dung"
+            gh issue edit "$EXISTING" --body-file /tmp/body.md
+          else
+            gh label create upstream-sync --color "0E8A16" --description "Upstream has new commits" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body-file /tmp/body.md --label upstream-sync
+          fi
