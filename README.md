@@ -15,6 +15,7 @@ Firmware CrossPoint cho máy đọc sách **Xteink X3** với hỗ trợ tiếng
   - Hyphenation EPUB theo ISO 639-2 language code
 - ✅ **Đa ngôn ngữ** — ngoài tiếng Việt vẫn giữ 19 ngôn ngữ khác của upstream (EN, ES, FR, DE, IT, PT, RU, UK, PL, ...)
 - ✅ **Base on stable release 1.2.0** — không phải dev build experimental
+- ✅ **Patch riêng:** fix sleep screen không fill đủ màn hình X3 khi dùng ảnh kích thước X4 (xem [Patches](#patches-riêng-của-fork-này))
 
 ## Cách flash
 
@@ -63,6 +64,33 @@ Khác biệt so với `danoooob/crosspoint-reader-vi`:
 - Target **Xteink X3** (danoooob build cho X4)
 - Dựa trên commit upstream mới hơn (bao gồm X3 support + fix release 1.2.0)
 - Giữ đầy đủ 19 ngôn ngữ upstream (danoooob xoá Spanish để tiết kiệm flash)
+- Có thêm patch sleep-screen crop fix chưa có trong upstream (xem bên dưới)
+
+## Patches riêng của fork này
+
+Những fix tôi tự phát hiện và vá thêm so với upstream `crosspoint-reader`. Đã submit upstream PR để các fork khác cùng hưởng.
+
+### Fix: Sleep screen không fill đủ màn hình trên X3
+
+**Hiện tượng:** Đặt `sleep.bmp` kích thước 480×800 (chuẩn X4) trên X3 (528×792) ở chế độ `Cover Mode: CROP` → ảnh bị render ở góc trái trên với 1:1 pixel, bên phải trống 48px, bên dưới trống 72px. Mặc định lẽ ra phải scale lên 1.1× và crop vừa màn hình.
+
+**Nguyên nhân (3 bugs cộng dồn trong render path):**
+
+1. `SleepActivity::renderBitmapSleepScreen()` chỉ vào branch scale/crop khi bitmap **lớn hơn** màn hình ở ít nhất một chiều. Ảnh 480×800 nhỏ hơn 528×792 ở chiều ngang → rơi vào branch "center only" không hề scale.
+2. `GfxRenderer::drawBitmap()` chỉ áp dụng scaling khi `fitScale < 1.0` (chỉ downscale). Yêu cầu upscale bị bỏ qua âm thầm.
+3. Render loop iterate source pixels và map 1:1 sang dest pixel. Khi upscale, loop này để lại dòng/cột trống giữa các source row/col (nearest-neighbor artifact).
+
+**Fix:**
+
+- Trigger scale/crop khi `bitmap size != screen size` (không chỉ khi lớn hơn).
+- Cho phép cả upscale và downscale trong `drawBitmap()` (`fitScale != 1.0f`).
+- Thay render loop 1:1 bằng **dest-span fill** (nearest-neighbor block): mỗi source pixel ghi ra span `[floor(idx*scale), floor((idx+1)*scale) - 1]`. Khi `scale ≤ 1.0` span = 1, nên hành vi downscale / no-scale không đổi, bit-for-bit giống master.
+
+**Test case:** ảnh X4 480×800 → X3 528×792 CROP mode → giờ render full 528×792, không còn viền trống.
+
+Commit: [`10aeb6f`](../../commit/10aeb6f) • Files: `lib/GfxRenderer/GfxRenderer.cpp`, `src/activities/boot_sleep/SleepActivity.cpp` (+57 / -27).
+
+Upstream PR: [crosspoint-reader/crosspoint-reader#1716](https://github.com/crosspoint-reader/crosspoint-reader/pull/1716).
 
 ## Build từ source
 
