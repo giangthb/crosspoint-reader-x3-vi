@@ -105,6 +105,7 @@ jobs:
         if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh label list --json name --jq '.[].name' | grep -qx upstream-sync \
             || gh label create upstream-sync --color "0E8A16" --description "Upstream has new commits"
@@ -113,6 +114,7 @@ jobs:
         if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TODAY=$(date -u +%Y-%m-%d)
           TITLE="Upstream update available ($TODAY)"
