@@ -635,8 +635,11 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool allowUpscale) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
-  // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
-  if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
+  // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit).
+  // Skip the fast path when the caller opts in to upscaling, since drawBitmap1Bit() only
+  // downscales; falling through to the span-aware 2-bit path here lets 1-bit sleep images
+  // authored for a different panel size fill the screen.
+  if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f && !allowUpscale) {
     drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
     return;
   }
