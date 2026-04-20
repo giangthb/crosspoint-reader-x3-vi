@@ -60,19 +60,12 @@ jobs:
             echo "tag=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create release
+      # Upload only; do NOT overwrite body/name of an existing release so that
+      # custom Vietnamese release notes we curate by hand stay intact. The
+      # workflow just ensures the CI-built firmware.bin is attached to the tag.
+      - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }} — Xteink X3 with Vietnamese
-          generate_release_notes: true
-          body: |
-            Firmware build `${{ steps.tag.outputs.tag }}` cho Xteink X3 với hỗ trợ tiếng Việt.
-
-            - `firmware.bin` — ${{ steps.sha.outputs.size }} bytes
-            - SHA256: `${{ steps.sha.outputs.sha256 }}`
-
-            **Flash qua web:** https://x3.crosspointreader.com/ → "Flash custom firmware"
-
-            Xem README để biết chi tiết, hướng dẫn flash và rollback.
           files: .pio/build/gh_release/firmware.bin
+          fail_on_unmatched_files: true
