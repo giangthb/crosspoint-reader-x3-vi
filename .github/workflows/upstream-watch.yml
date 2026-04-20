@@ -101,6 +101,14 @@ jobs:
 
           cat /tmp/body.md
 
+      - name: Ensure label exists
+        if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label list --json name --jq '.[].name' | grep -qx upstream-sync \
+            || gh label create upstream-sync --color "0E8A16" --description "Upstream has new commits"
+
       - name: Open / update issue
         if: steps.collect.outputs.up_count != '0' || steps.collect.outputs.vi_count != '0'
         env:
@@ -117,6 +125,5 @@ jobs:
             echo "Issue #$EXISTING đã tồn tại, update nội dung"
             gh issue edit "$EXISTING" --body-file /tmp/body.md
           else
-            gh label create upstream-sync --color "0E8A16" --description "Upstream has new commits" 2>/dev/null || true
             gh issue create --title "$TITLE" --body-file /tmp/body.md --label upstream-sync
           fi
